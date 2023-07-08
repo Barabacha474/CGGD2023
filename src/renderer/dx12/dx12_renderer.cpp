@@ -27,6 +27,14 @@ void cg::renderer::dx12_renderer::init()
 	camera->set_z_near(settings->camera_z_near);
 	camera->set_z_far(settings->camera_z_far);
 
+	view_port = CD3DX12_VIEWPORT(0.f, 0.f,
+								 static_cast<float>(settings->width),
+								 static_cast<float>(settings->height));
+
+	scissor_rect = CD3DX12_RECT(0, 0,
+								 static_cast<LONG>(settings->width),
+								 static_cast<LONG>(settings->height));
+
 	load_pipeline();
 	load_assets();
 }
@@ -39,7 +47,13 @@ void cg::renderer::dx12_renderer::destroy()
 
 void cg::renderer::dx12_renderer::update()
 {
-	// TODO Lab: 3.08 Implement `update` method of `dx12_renderer`
+	auto now = std::chrono::high_resolution_clock::now();
+	std::chrono::duration<float> duration = now - current_time;
+	frame_duration = duration.count();
+	current_time = now;
+
+	cb.mwpMatrix = camera->get_dxm_mvp_matrix();
+	memcpy(constant_buffer_data_begin, &cb, sizeof(cb));
 }
 
 void cg::renderer::dx12_renderer::render()
@@ -76,7 +90,7 @@ void cg::renderer::dx12_renderer::initialize_device(ComPtr<IDXGIFactory4>& dxgi_
 {
 	ComPtr<IDXGIAdapter1> hardware_adapter;
 	dxgi_factory->EnumAdapters1(0, &hardware_adapter);
-#if _DEBUG
+#ifdef _DEBUG
 	DXGI_ADAPTER_DESC adapter_desc{};
 	hardware_adapter->GetDesc(&adapter_desc);
 	OutputDebugString(adapter_desc.Description);
@@ -127,7 +141,7 @@ void cg::renderer::dx12_renderer::create_render_target_views()
 		device->CreateRenderTargetView(
 				render_targets[i].Get(),
 				nullptr,
-				rtv_heap.get_cpu_descriptor_handle()
+				rtv_heap.get_cpu_descriptor_handle(i)
 				);
 		std::wstring name(L"Render target ");
 		name += std::to_wstring(i);
@@ -334,10 +348,10 @@ void cg::renderer::dx12_renderer::create_resource_on_default_heap(ComPtr<ID3D12R
 
 void cg::renderer::dx12_renderer::copy_data(const void* buffer_data, UINT buffer_size, ComPtr<ID3D12Resource>& destination_resource)
 {
-	UINT8* buffer_data_beggin;
+	UINT8* buffer_data_begin;
 	CD3DX12_RANGE read_range(0,0);
-	THROW_IF_FAILED(destination_resource->Map(0, &read_range, reinterpret_cast<void**>(&buffer_data_beggin)));
-	memcpy(buffer_data_beggin, buffer_data, buffer_size);
+	THROW_IF_FAILED(destination_resource->Map(0, &read_range, reinterpret_cast<void**>(&buffer_data_begin)));
+	memcpy(buffer_data_begin, buffer_data, buffer_size);
 	destination_resource->Unmap(0, 0);
 }
 
@@ -463,6 +477,7 @@ void cg::renderer::dx12_renderer::load_assets()
 	if (fence_event == nullptr) {
 		THROW_IF_FAILED(HRESULT_FROM_WIN32(GetLastError()));
 	}
+	wait_for_gpu();
 }
 
 
